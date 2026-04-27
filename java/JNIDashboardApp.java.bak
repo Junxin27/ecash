@@ -1,0 +1,320 @@
+import javafx.application.Application;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.*;
+import javafx.scene.layout.*;
+import javafx.scene.paint.Color;
+import javafx.scene.shape.Circle;
+import javafx.scene.text.Font;
+import javafx.scene.text.FontWeight;
+import javafx.stage.Stage;
+
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+public class JNIDashboardApp extends Application {
+
+    private final EcashAPI api = new EcashAPI();
+
+    private Label titleLabel;
+    private Label descLabel;
+    private Label totalCoinsLabel;
+    private Label systemStatusLabel;
+    private TextArea logArea;
+    private GridPane valueGrid;
+    private VBox actionBox;
+
+    private String latestWalletJson = "";
+
+    @Override
+    public void start(Stage stage) {
+        BorderPane root = new BorderPane();
+        root.setPadding(new Insets(18));
+        root.setStyle("-fx-background-color: #f4f7fb;");
+
+        root.setTop(buildTopPanel());
+        root.setCenter(buildMainPanel());
+
+        Scene scene = new Scene(root, 1250, 760);
+        stage.setTitle("Provably Secure E-Cash Dashboard");
+        stage.setScene(scene);
+        stage.show();
+
+        runAction("Initialize System", api::initSystem);
+    }
+
+    private VBox buildTopPanel() {
+        VBox top = new VBox(10);
+        top.setPadding(new Insets(18));
+        top.setStyle(cardStyle("#ffffff") + "-fx-border-width: 3; -fx-border-color: #111827;");
+
+        Label mainTitle = new Label("Provably Secure E-Cash Prototype");
+        mainTitle.setFont(Font.font("Arial", FontWeight.BOLD, 26));
+
+        Label subtitle = new Label("JNI-connected JavaFX dashboard for User Wallet, Bank Authority, and Merchant Verifier");
+        subtitle.setTextFill(Color.web("#4b5563"));
+        subtitle.setFont(Font.font("Arial", 15));
+
+        HBox stats = new HBox(15);
+        stats.setAlignment(Pos.CENTER_LEFT);
+
+        totalCoinsLabel = statLabel("Total Coins: 0");
+        systemStatusLabel = statLabel("System: Starting...");
+        Label backendLabel = statLabel("Backend: C++ Core + JNI");
+
+        stats.getChildren().addAll(totalCoinsLabel, systemStatusLabel, backendLabel);
+        top.getChildren().addAll(mainTitle, subtitle, stats);
+
+        return top;
+    }
+
+    private HBox buildMainPanel() {
+        HBox main = new HBox(18);
+        main.setPadding(new Insets(18, 0, 0, 0));
+        main.getChildren().addAll(buildPartyPanel(), buildActionPanel(), buildValuePanel());
+        HBox.setHgrow(main.getChildren().get(2), Priority.ALWAYS);
+        return main;
+    }
+
+    private StackPane buildPartyPanel() {
+        StackPane pane = new StackPane();
+        pane.setPrefWidth(420);
+        pane.setMinWidth(420);
+        pane.setStyle(cardStyle("#eef2ff") + "-fx-border-width: 3; -fx-border-color: #111827;");
+
+        Pane canvas = new Pane();
+        canvas.setPrefSize(420, 560);
+
+        VBox user = partyNode("USER", "Wallet / Spend", "#dbeafe");
+        user.setLayoutX(140);
+        user.setLayoutY(45);
+        user.setOnMouseClicked(e -> showUserActions());
+
+        VBox bank = partyNode("BANK", "Issue / Deposit", "#dcfce7");
+        bank.setLayoutX(35);
+        bank.setLayoutY(320);
+        bank.setOnMouseClicked(e -> showBankActions());
+
+        VBox merchant = partyNode("MERCHANT", "Verify Payment", "#fce7f3");
+        merchant.setLayoutX(250);
+        merchant.setLayoutY(320);
+        merchant.setOnMouseClicked(e -> showMerchantActions());
+
+        Label flow = new Label("User  →  Bank  →  Merchant  →  Bank");
+        flow.setLayoutX(75);
+        flow.setLayoutY(505);
+        flow.setFont(Font.font("Arial", FontWeight.BOLD, 15));
+        flow.setStyle("-fx-background-color: #111827; -fx-text-fill: white; -fx-padding: 8 14; -fx-background-radius: 18;");
+
+        canvas.getChildren().addAll(user, bank, merchant, flow);
+        pane.getChildren().add(canvas);
+        return pane;
+    }
+
+    private VBox buildActionPanel() {
+        VBox panel = new VBox(14);
+        panel.setPrefWidth(310);
+        panel.setMinWidth(310);
+        panel.setPadding(new Insets(18));
+        panel.setStyle(cardStyle("#ffffff") + "-fx-border-width: 3; -fx-border-color: #111827;");
+
+        titleLabel = new Label("System Actions");
+        titleLabel.setFont(Font.font("Arial", FontWeight.BOLD, 23));
+
+        descLabel = new Label("Choose User, Bank, or Merchant to perform e-cash protocol actions.");
+        descLabel.setWrapText(true);
+        descLabel.setTextFill(Color.web("#4b5563"));
+
+        actionBox = new VBox(10);
+        showUserActions();
+
+        logArea = new TextArea();
+        logArea.setEditable(false);
+        logArea.setWrapText(true);
+        logArea.setPrefHeight(230);
+        logArea.setStyle("-fx-control-inner-background: #f9fafb; -fx-font-family: Consolas; -fx-font-size: 12px;");
+
+        panel.getChildren().addAll(titleLabel, descLabel, actionBox, new Label("Operation Log"), logArea);
+        VBox.setVgrow(logArea, Priority.ALWAYS);
+        return panel;
+    }
+
+    private VBox buildValuePanel() {
+        VBox panel = new VBox(12);
+        panel.setPadding(new Insets(18));
+        panel.setStyle(cardStyle("#ffffff") + "-fx-border-width: 3; -fx-border-color: #111827;");
+
+        Label label = new Label("Significant Cryptographic Values");
+        label.setFont(Font.font("Arial", FontWeight.BOLD, 23));
+
+        Label hint = new Label("Shows real values returned from your C++ backend through JNI.");
+        hint.setTextFill(Color.web("#4b5563"));
+
+        ScrollPane scroll = new ScrollPane();
+        scroll.setFitToWidth(true);
+        scroll.setStyle("-fx-background: white; -fx-background-color: white;");
+
+        valueGrid = new GridPane();
+        valueGrid.setHgap(8);
+        valueGrid.setVgap(8);
+        valueGrid.setPadding(new Insets(10));
+        scroll.setContent(valueGrid);
+
+        panel.getChildren().addAll(label, hint, scroll);
+        VBox.setVgrow(scroll, Priority.ALWAYS);
+        return panel;
+    }
+
+    private void showUserActions() {
+        titleLabel.setText("User Wallet");
+        descLabel.setText("The user stores issued coins, views wallet data, and spends coins anonymously.");
+        actionBox.getChildren().setAll(
+            actionButton("View Wallet", () -> runAction("View Wallet", api::viewWallet)),
+            actionButton("Spend Coin", () -> runAction("Spend Coin", api::spendCoin))
+        );
+    }
+
+    private void showBankActions() {
+        titleLabel.setText("Bank Authority");
+        descLabel.setText("The bank issues coins and detects double-spending using serial number registration.");
+        actionBox.getChildren().setAll(
+            actionButton("Withdraw / Issue Coin", () -> runAction("Withdraw Coin", api::withdrawCoin)),
+            actionButton("Double-Spending Demo", () -> runAction("Double-Spending Demo", api::doubleSpendDemo))
+        );
+    }
+
+    private void showMerchantActions() {
+        titleLabel.setText("Merchant Verifier");
+        descLabel.setText("The merchant verifies the received coin before deposit to the bank.");
+        actionBox.getChildren().setAll(
+            actionButton("Verify Payment", () -> runAction("Verify Payment", api::verifyPayment)),
+            actionButton("View Latest Wallet Status", () -> runAction("View Wallet", api::viewWallet))
+        );
+    }
+
+    private Button actionButton(String text, Runnable action) {
+        Button btn = new Button(text);
+        btn.setMaxWidth(Double.MAX_VALUE);
+        btn.setMinHeight(42);
+        btn.setStyle("-fx-background-color: #111827; -fx-text-fill: white; -fx-font-weight: bold; -fx-background-radius: 10;");
+        btn.setOnAction(e -> action.run());
+        return btn;
+    }
+
+    private void runAction(String actionName, JNIAction action) {
+        try {
+            String json = action.run();
+            logArea.setText("[" + actionName + "]\n" + json);
+            displayValues(parseJson(json));
+
+            if (json.contains("\"totalCoins\"")) {
+                String total = extract(json, "totalCoins");
+                if (!total.isEmpty()) totalCoinsLabel.setText("Total Coins: " + total);
+                latestWalletJson = json;
+            }
+
+            if (json.contains("\"success\":true")) {
+                systemStatusLabel.setText("System: OK");
+            } else {
+                systemStatusLabel.setText("System: Error");
+            }
+        } catch (Throwable ex) {
+            logArea.setText("[" + actionName + "]\nERROR: " + ex.getMessage());
+            systemStatusLabel.setText("System: Error");
+        }
+    }
+
+    private void displayValues(Map<String, String> values) {
+        valueGrid.getChildren().clear();
+
+        int row = 0;
+        for (Map.Entry<String, String> entry : values.entrySet()) {
+            Label key = new Label(formatKey(entry.getKey()));
+            key.setFont(Font.font("Arial", FontWeight.BOLD, 12));
+            key.setMinWidth(160);
+            key.setStyle("-fx-background-color: #f3f4f6; -fx-padding: 8; -fx-border-color: #e5e7eb;");
+
+            TextArea val = new TextArea(entry.getValue());
+            val.setWrapText(true);
+            val.setEditable(false);
+            val.setPrefRowCount(entry.getValue().length() > 90 ? 3 : 1);
+            val.setStyle("-fx-font-family: Consolas; -fx-font-size: 11px; -fx-control-inner-background: #ffffff;");
+
+            valueGrid.add(key, 0, row);
+            valueGrid.add(val, 1, row);
+            GridPane.setHgrow(val, Priority.ALWAYS);
+            row++;
+        }
+    }
+
+    private Map<String, String> parseJson(String json) {
+        Map<String, String> map = new LinkedHashMap<>();
+        Pattern p = Pattern.compile("\\\"([^\\\"]+)\\\"\\s*:\\s*(\\\"([^\\\"]*)\\\"|true|false|-?\\d+)");
+        Matcher m = p.matcher(json);
+
+        while (m.find()) {
+            String key = m.group(1);
+            String raw = m.group(2);
+            String value = raw.startsWith("\"") ? m.group(3) : raw;
+            map.put(key, value);
+        }
+
+        return map;
+    }
+
+    private String extract(String json, String key) {
+        Pattern p = Pattern.compile("\\\"" + key + "\\\"\\s*:\\s*(\\d+|true|false|\\\"([^\\\"]*)\\\")");
+        Matcher m = p.matcher(json);
+        if (!m.find()) return "";
+        String v = m.group(1);
+        return v.replace("\"", "");
+    }
+
+    private String formatKey(String key) {
+        String spaced = key.replaceAll("([A-Z])", " $1");
+        return spaced.substring(0, 1).toUpperCase() + spaced.substring(1);
+    }
+
+    private Label statLabel(String text) {
+        Label label = new Label(text);
+        label.setStyle("-fx-background-color: white; -fx-border-color: #d1d5db; -fx-border-width: 2; -fx-background-radius: 10; -fx-border-radius: 10; -fx-padding: 10 14;");
+        label.setFont(Font.font("Arial", FontWeight.BOLD, 13));
+        return label;
+    }
+
+    private VBox partyNode(String title, String subtitle, String color) {
+        Circle circle = new Circle(58);
+        circle.setFill(Color.web(color));
+        circle.setStroke(Color.web("#111827"));
+        circle.setStrokeWidth(4);
+
+        Label t = new Label(title);
+        t.setFont(Font.font("Arial", FontWeight.BOLD, 17));
+
+        Label s = new Label(subtitle);
+        s.setFont(Font.font("Arial", 11));
+        s.setTextFill(Color.web("#4b5563"));
+
+        VBox box = new VBox(4, circle, t, s);
+        box.setAlignment(Pos.CENTER);
+        box.setPrefWidth(135);
+        box.setStyle("-fx-cursor: hand;");
+        return box;
+    }
+
+    private String cardStyle(String background) {
+        return "-fx-background-color: " + background + "; -fx-background-radius: 16; -fx-border-radius: 16; ";
+    }
+
+    @FunctionalInterface
+    interface JNIAction {
+        String run();
+    }
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+}

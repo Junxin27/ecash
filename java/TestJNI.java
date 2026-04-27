@@ -1,0 +1,12 @@
+public class TestJNI {
+    public static void main(String[] args) {
+        EcashAPI api = new EcashAPI();
+
+        System.out.println(api.initSystem());
+        System.out.println(api.withdrawCoin());
+        System.out.println(api.viewWallet());
+        System.out.println(api.spendCoin());
+        System.out.println(api.verifyPayment());
+        System.out.println(api.doubleSpendDemo());
+    }
+}
