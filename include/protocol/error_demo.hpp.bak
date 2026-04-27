@@ -1,0 +1,11 @@
+#pragma once
+
+#include "wallet/wallet.hpp"
+#include "bank/bank.hpp"
+#include "merchant/merchant.hpp"
+
+namespace protocol {
+
+void run_error_demo(Wallet& wallet, Bank& bank, Merchant& merchant);
+
+}

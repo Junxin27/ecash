@@ -1,0 +1,26 @@
+#pragma once
+
+#include <cstddef>
+#include "wallet/wallet.hpp"
+#include "bank/bank.hpp"
+#include "merchant/merchant.hpp"
+#include "protocol/payment_transcript.hpp"
+
+namespace protocol {
+
+bool withdraw_phase(Wallet& wallet, const Bank& bank);
+bool blind_withdraw_phase(Wallet& wallet, const Bank& bank);
+std::size_t withdraw_multiple_phase(Wallet& wallet, const Bank& bank, std::size_t count);
+
+bool spend_phase(const Wallet& wallet, const Bank& bank, const Merchant& merchant, std::size_t coin_index);
+bool deposit_phase(Wallet& wallet, Bank& bank, std::size_t coin_index);
+
+PaymentTranscript execute_payment(
+    Wallet& wallet,
+    Bank& bank,
+    Merchant& merchant,
+    std::size_t coin_index,
+    const std::string& merchant_id
+);
+
+}

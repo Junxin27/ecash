@@ -1,0 +1,53 @@
+#include <iostream>
+#include <cstdio>
+#include "protocol/withdraw_request.hpp"
+
+namespace protocol {
+
+static void print_g1_hex(const char* label, const ECP_BLS381& p) {
+    char buffer[1024];
+    octet out{0, static_cast<int>(sizeof(buffer)), buffer};
+
+    ECP_BLS381_toOctet(&out, const_cast<ECP_BLS381*>(&p), true);
+
+    std::cout << label << ": ";
+    for (int i = 0; i < out.len; ++i) {
+        std::printf("%02x", static_cast<unsigned char>(out.val[i]));
+    }
+    std::cout << "\n";
+}
+
+static void mul_to(ECP_BLS381& out, const ECP_BLS381& base, const BIG_384_58 scalar) {
+    ECP_BLS381_copy(&out, const_cast<ECP_BLS381*>(&base));
+    ECP_BLS381_mul(&out, const_cast<chunk*>(scalar));
+}
+
+void build_withdraw_request(
+    const wallet::Coin& coin,
+    const crypto::BBSGenerators& gens,
+    WithdrawRequest& req
+) {
+    ECP_BLS381 t1, t2, blind_term;
+
+    // commitment = g1 + h1*serial + h2*randomness
+    ECP_BLS381_copy(&req.commitment, const_cast<ECP_BLS381*>(&gens.g1));
+
+    mul_to(t1, gens.h1, coin.serial);
+    ECP_BLS381_add(&req.commitment, &t1);
+
+    mul_to(t2, gens.h2, coin.randomness);
+    ECP_BLS381_add(&req.commitment, &t2);
+
+    // blinded_commitment = commitment + h0*blind_factor
+    ECP_BLS381_copy(&req.blinded_commitment, &req.commitment);
+
+    mul_to(blind_term, gens.h0, coin.blind_factor);
+    ECP_BLS381_add(&req.blinded_commitment, &blind_term);
+}
+
+void print_withdraw_request(const WithdrawRequest& req) {
+    print_g1_hex("Commitment", req.commitment);
+    print_g1_hex("Blinded commitment", req.blinded_commitment);
+}
+
+}

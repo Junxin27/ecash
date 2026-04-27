@@ -1,0 +1,353 @@
+#include <jni.h>
+#include <string>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <iomanip>
+
+#include "wallet/wallet.hpp"
+#include "wallet/coin.hpp"
+#include "bank/bank.hpp"
+#include "merchant/merchant.hpp"
+
+extern "C" {
+#include "big_384_58.h"
+#include "ecp_BLS381.h"
+}
+
+static std::unique_ptr<Wallet> g_wallet;
+static std::unique_ptr<Bank> g_bank;
+static std::unique_ptr<Merchant> g_merchant;
+static std::mutex g_lock;
+
+static jstring to_jstring(JNIEnv* env, const std::string& json) {
+    return env->NewStringUTF(json.c_str());
+}
+
+static std::string bool_str(bool v) {
+    return v ? "true" : "false";
+}
+
+static void ensure_system_ready() {
+    if (!g_wallet) g_wallet = std::make_unique<Wallet>();
+    if (!g_bank) g_bank = std::make_unique<Bank>();
+    if (!g_merchant) g_merchant = std::make_unique<Merchant>();
+}
+
+static std::string big_to_hex(const BIG_384_58 x) {
+    BIG_384_58 tmp;
+    BIG_384_58_copy(tmp, const_cast<chunk*>(x));
+
+    char bytes[MODBYTES_384_58];
+    BIG_384_58_toBytes(bytes, tmp);
+
+    std::ostringstream oss;
+    for (int i = 0; i < MODBYTES_384_58; ++i) {
+        oss << std::hex << std::setw(2) << std::setfill('0')
+            << static_cast<unsigned int>(static_cast<unsigned char>(bytes[i]));
+    }
+    return oss.str();
+}
+
+static std::string ecp_to_hex(ECP_BLS381& p) {
+    char buffer[1024];
+    octet out = {0, static_cast<int>(sizeof(buffer)), buffer};
+
+    ECP_BLS381_toOctet(&out, &p, true);
+
+    std::ostringstream oss;
+    for (int i = 0; i < out.len; ++i) {
+        oss << std::hex << std::setw(2) << std::setfill('0')
+            << static_cast<unsigned int>(static_cast<unsigned char>(out.val[i]));
+    }
+    return oss.str();
+}
+
+static std::string coin_to_json(const wallet::Coin& coin, bool success, const std::string& message) {
+    wallet::Coin copy = coin;
+
+    std::ostringstream json;
+    json << "{";
+    json << "\"success\":" << bool_str(success) << ",";
+    json << "\"message\":\"" << message << "\",";
+    json << "\"serial\":\"" << big_to_hex(copy.serial) << "\",";
+    json << "\"randomness\":\"" << big_to_hex(copy.randomness) << "\",";
+    json << "\"value\":\"" << big_to_hex(copy.value) << "\",";
+    json << "\"blindFactor\":\"" << big_to_hex(copy.blind_factor) << "\",";
+    json << "\"commitment\":\"" << ecp_to_hex(copy.commitment) << "\",";
+    json << "\"blindedCommitment\":\"" << ecp_to_hex(copy.blinded_commitment) << "\",";
+    json << "\"spendSerial\":\"" << big_to_hex(copy.spend_serial) << "\",";
+    json << "\"spendRandomness\":\"" << big_to_hex(copy.spend_randomness) << "\",";
+    json << "\"signatureA\":\"" << ecp_to_hex(copy.signature.A) << "\",";
+    json << "\"signatureE\":\"" << big_to_hex(copy.signature.e) << "\",";
+    json << "\"signatureS\":\"" << big_to_hex(copy.signature.s) << "\",";
+    json << "\"spent\":" << bool_str(copy.spent) << ",";
+    json << "\"blindIssued\":" << bool_str(copy.blind_issued);
+    json << "}";
+
+    return json.str();
+}
+
+extern "C" {
+
+JNIEXPORT jstring JNICALL Java_EcashAPI_initSystem(JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> guard(g_lock);
+
+    try {
+        ensure_system_ready();
+
+        return to_jstring(env,
+            "{"
+            "\"success\":true,"
+            "\"message\":\"Wallet, Bank, and Merchant initialized successfully.\","
+            "\"stage\":\"Real C++ object initialization connected\""
+            "}"
+        );
+    } catch (...) {
+        return to_jstring(env,
+            "{\"success\":false,\"message\":\"C++ object initialization failed.\"}"
+        );
+    }
+}
+
+JNIEXPORT jstring JNICALL Java_EcashAPI_withdrawCoin(JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> guard(g_lock);
+
+    try {
+        ensure_system_ready();
+
+        wallet::Coin new_coin;
+        wallet::init_coin(new_coin);
+
+        const bool issued = g_bank->issue_coin(new_coin);
+
+        if (issued) {
+            g_wallet->add_coin(new_coin);
+
+            return to_jstring(env, coin_to_json(
+                new_coin,
+                true,
+                "Coin issued successfully and stored in wallet."
+            ));
+        }
+
+        return to_jstring(env, coin_to_json(
+            new_coin,
+            false,
+            "Coin issuance failed."
+        ));
+    } catch (...) {
+        return to_jstring(env,
+            "{\"success\":false,\"message\":\"withdrawCoin failed inside C++ backend.\"}"
+        );
+    }
+}
+
+JNIEXPORT jstring JNICALL Java_EcashAPI_viewWallet(JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> guard(g_lock);
+
+    try {
+        ensure_system_ready();
+
+        std::ostringstream json;
+        json << "{";
+        json << "\"success\":true,";
+        json << "\"totalCoins\":" << g_wallet->coin_count() << ",";
+        json << "\"hasCoins\":" << bool_str(g_wallet->has_coins()) << ",";
+        json << "\"message\":\"Wallet status loaded from C++ backend.\"";
+
+        if (g_wallet->has_coins()) {
+            const std::size_t latest = g_wallet->coin_count() - 1;
+            const wallet::Coin& coin = g_wallet->get_coin(latest);
+            wallet::Coin copy = coin;
+
+            json << ",";
+            json << "\"latestCoinIndex\":" << latest << ",";
+            json << "\"latestSerial\":\"" << big_to_hex(copy.serial) << "\",";
+            json << "\"latestRandomness\":\"" << big_to_hex(copy.randomness) << "\",";
+            json << "\"latestValue\":\"" << big_to_hex(copy.value) << "\",";
+            json << "\"latestBlindFactor\":\"" << big_to_hex(copy.blind_factor) << "\",";
+            json << "\"latestCommitment\":\"" << ecp_to_hex(copy.commitment) << "\",";
+            json << "\"latestBlindedCommitment\":\"" << ecp_to_hex(copy.blinded_commitment) << "\",";
+            json << "\"latestSpendSerial\":\"" << big_to_hex(copy.spend_serial) << "\",";
+            json << "\"latestSpendRandomness\":\"" << big_to_hex(copy.spend_randomness) << "\",";
+            json << "\"latestSignatureA\":\"" << ecp_to_hex(copy.signature.A) << "\",";
+            json << "\"latestSignatureE\":\"" << big_to_hex(copy.signature.e) << "\",";
+            json << "\"latestSignatureS\":\"" << big_to_hex(copy.signature.s) << "\",";
+            json << "\"latestSpent\":" << bool_str(copy.spent) << ",";
+            json << "\"latestBlindIssued\":" << bool_str(copy.blind_issued);
+        }
+
+        json << "}";
+        return to_jstring(env, json.str());
+
+    } catch (...) {
+        return to_jstring(env,
+            "{\"success\":false,\"message\":\"viewWallet failed inside C++ backend.\"}"
+        );
+    }
+}
+
+JNIEXPORT jstring JNICALL Java_EcashAPI_spendCoin(JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> guard(g_lock);
+
+    try {
+        ensure_system_ready();
+
+        if (!g_wallet->has_coins()) {
+            return to_jstring(env,
+                "{\"success\":false,\"message\":\"No coin available. Please withdraw a coin first.\"}"
+            );
+        }
+
+        const std::size_t coin_index = 0;
+
+        if (g_wallet->is_coin_spent(coin_index)) {
+            return to_jstring(env,
+                "{\"success\":false,\"message\":\"Selected coin is already marked as spent.\"}"
+            );
+        }
+
+        const wallet::Coin& selected_coin = g_wallet->get_coin(coin_index);
+        wallet::Coin copy = selected_coin;
+
+        const bool merchant_ok = g_merchant->verify_coin(
+            selected_coin,
+            g_bank->public_key(),
+            g_bank->generators()
+        );
+
+        std::ostringstream json;
+        json << "{";
+        json << "\"success\":" << bool_str(merchant_ok) << ",";
+        json << "\"message\":\"Spend request executed through merchant verifier.\",";
+        json << "\"coinIndex\":" << coin_index << ",";
+        json << "\"merchantVerified\":" << bool_str(merchant_ok) << ",";
+        json << "\"serial\":\"" << big_to_hex(copy.serial) << "\",";
+        json << "\"spendSerial\":\"" << big_to_hex(copy.spend_serial) << "\",";
+        json << "\"spendRandomness\":\"" << big_to_hex(copy.spend_randomness) << "\",";
+        json << "\"commitment\":\"" << ecp_to_hex(copy.commitment) << "\",";
+        json << "\"blindedCommitment\":\"" << ecp_to_hex(copy.blinded_commitment) << "\",";
+        json << "\"signatureA\":\"" << ecp_to_hex(copy.signature.A) << "\",";
+        json << "\"signatureE\":\"" << big_to_hex(copy.signature.e) << "\",";
+        json << "\"signatureS\":\"" << big_to_hex(copy.signature.s) << "\",";
+        json << "\"note\":\"Coin is verified by merchant, but not deposited to bank yet.\"";
+        json << "}";
+
+        return to_jstring(env, json.str());
+
+    } catch (...) {
+        return to_jstring(env,
+            "{\"success\":false,\"message\":\"spendCoin failed inside C++ backend.\"}"
+        );
+    }
+}
+
+JNIEXPORT jstring JNICALL Java_EcashAPI_verifyPayment(JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> guard(g_lock);
+
+    try {
+        ensure_system_ready();
+
+        if (!g_wallet->has_coins()) {
+            return to_jstring(env,
+                "{\"success\":false,\"message\":\"No coin available for verification.\"}"
+            );
+        }
+
+        const std::size_t coin_index = 0;
+
+        if (g_wallet->is_coin_spent(coin_index)) {
+            return to_jstring(env,
+                "{\"success\":false,\"message\":\"Coin is already spent in wallet.\"}"
+            );
+        }
+
+        const wallet::Coin& selected_coin = g_wallet->get_coin(coin_index);
+        wallet::Coin copy = selected_coin;
+
+        const bool merchant_ok = g_merchant->verify_coin(
+            selected_coin,
+            g_bank->public_key(),
+            g_bank->generators()
+        );
+
+        bool bank_accepted = false;
+
+        if (merchant_ok) {
+            bank_accepted = g_bank->deposit_coin(selected_coin);
+
+            if (bank_accepted) {
+                g_wallet->mark_coin_spent(coin_index);
+            }
+        }
+
+        std::ostringstream json;
+        json << "{";
+        json << "\"success\":" << bool_str(merchant_ok && bank_accepted) << ",";
+        json << "\"message\":\"Payment verified by merchant and deposited to bank.\",";
+        json << "\"coinIndex\":" << coin_index << ",";
+        json << "\"merchantVerified\":" << bool_str(merchant_ok) << ",";
+        json << "\"bankAccepted\":" << bool_str(bank_accepted) << ",";
+        json << "\"serialChecked\":\"" << big_to_hex(copy.spend_serial) << "\",";
+        json << "\"commitment\":\"" << ecp_to_hex(copy.commitment) << "\",";
+        json << "\"signatureA\":\"" << ecp_to_hex(copy.signature.A) << "\",";
+        json << "\"signatureE\":\"" << big_to_hex(copy.signature.e) << "\",";
+        json << "\"signatureS\":\"" << big_to_hex(copy.signature.s) << "\",";
+        json << "\"spentAfterDeposit\":" << bool_str(bank_accepted);
+        json << "}";
+
+        return to_jstring(env, json.str());
+
+    } catch (...) {
+        return to_jstring(env,
+            "{\"success\":false,\"message\":\"verifyPayment failed inside C++ backend.\"}"
+        );
+    }
+}
+
+JNIEXPORT jstring JNICALL Java_EcashAPI_doubleSpendDemo(JNIEnv* env, jobject) {
+    std::lock_guard<std::mutex> guard(g_lock);
+
+    try {
+        ensure_system_ready();
+
+        wallet::Coin replay_coin;
+        wallet::init_coin(replay_coin);
+
+        const bool issued = g_bank->issue_coin(replay_coin);
+
+        if (!issued) {
+            return to_jstring(env,
+                "{\"success\":false,\"message\":\"Could not issue demo coin for double-spending test.\"}"
+            );
+        }
+
+        const bool first_deposit = g_bank->deposit_coin(replay_coin);
+        const bool second_deposit = g_bank->deposit_coin(replay_coin);
+
+        std::ostringstream json;
+        json << "{";
+        json << "\"success\":true,";
+        json << "\"message\":\"Double-spending demo executed through C++ backend.\",";
+        json << "\"serial\":\"" << big_to_hex(replay_coin.spend_serial) << "\",";
+        json << "\"randomness\":\"" << big_to_hex(replay_coin.spend_randomness) << "\",";
+        json << "\"signatureA\":\"" << ecp_to_hex(replay_coin.signature.A) << "\",";
+        json << "\"signatureE\":\"" << big_to_hex(replay_coin.signature.e) << "\",";
+        json << "\"signatureS\":\"" << big_to_hex(replay_coin.signature.s) << "\",";
+        json << "\"firstDepositAccepted\":" << bool_str(first_deposit) << ",";
+        json << "\"secondDepositAccepted\":" << bool_str(second_deposit) << ",";
+        json << "\"doubleSpendDetected\":" << bool_str(first_deposit && !second_deposit) << ",";
+        json << "\"explanation\":\"The first deposit is accepted, while the second deposit is rejected because the same serial number already exists in the bank registry.\"";
+        json << "}";
+
+        return to_jstring(env, json.str());
+
+    } catch (...) {
+        return to_jstring(env,
+            "{\"success\":false,\"message\":\"doubleSpendDemo failed inside C++ backend.\"}"
+        );
+    }
+}
+
+}

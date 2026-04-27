@@ -1,0 +1,31 @@
+#include <iostream>
+#include <cstdio>
+#include "crypto/bbs.hpp"
+#include "crypto/amcl_utils.hpp"
+
+namespace crypto {
+
+void bbs_generate_keypair(BBSSecretKey& sk, BBSPublicKey& pk) {
+    ECP2_BLS381 g2;
+
+    get_g2_generator(&g2);
+    random_scalar(sk.x);
+
+    ECP2_BLS381_copy(&pk.w, &g2);
+    ECP2_BLS381_mul(&pk.w, sk.x);
+}
+
+void bbs_print_public_key(const BBSPublicKey& pk) {
+    char buffer[2048];
+    octet out{0, static_cast<int>(sizeof(buffer)), buffer};
+
+    ECP2_BLS381_toOctet(&out, &pk.w);
+
+    std::cout << "BBS public key (compressed G2): ";
+    for (int i = 0; i < out.len; ++i) {
+        std::printf("%02x", static_cast<unsigned char>(out.val[i]));
+    }
+    std::cout << "\n";
+}
+
+}

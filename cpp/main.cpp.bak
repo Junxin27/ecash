@@ -1,0 +1,37 @@
+#include <iostream>
+
+#include "crypto/amcl_utils.hpp"
+#include "wallet/wallet.hpp"
+#include "bank/bank.hpp"
+#include "merchant/merchant.hpp"
+#include "ui/dashboard.hpp"
+#include "protocol/transaction_flow.hpp"
+
+int main() {
+    std::cout << "E-Cash FYP prototype starting...\n";
+
+    crypto::init_rng();
+
+    Wallet wallet;
+    Bank bank;
+    Merchant merchant;
+
+    wallet.hello();
+    bank.hello();
+    merchant.hello();
+
+    bool USE_DASHBOARD = true;
+
+    if (USE_DASHBOARD) {
+        ui::run_dashboard(wallet, bank, merchant);
+    } else {
+        std::cout << "\nRunning test flow...\n";
+
+        protocol::withdraw_multiple_phase(wallet, bank, 2);
+        wallet.print_all_coins();
+    }
+
+    crypto::cleanup_rng();
+
+    return 0;
+}

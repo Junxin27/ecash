@@ -1,0 +1,56 @@
+#include <iostream>
+#include <stdexcept>
+#include "wallet/wallet.hpp"
+
+void Wallet::hello() const {
+    std::cout << "Wallet module loaded.\n";
+}
+
+void Wallet::add_coin(const wallet::Coin& coin) {
+    coins_.push_back(coin);
+}
+
+std::size_t Wallet::coin_count() const {
+    return coins_.size();
+}
+
+bool Wallet::has_coins() const {
+    return !coins_.empty();
+}
+
+const wallet::Coin& Wallet::get_coin(std::size_t index) const {
+    if (index >= coins_.size()) {
+        throw std::out_of_range("Wallet coin index out of range");
+    }
+    return coins_[index];
+}
+
+wallet::Coin& Wallet::get_coin(std::size_t index) {
+    if (index >= coins_.size()) {
+        throw std::out_of_range("Wallet coin index out of range");
+    }
+    return coins_[index];
+}
+
+bool Wallet::is_coin_spent(std::size_t index) const {
+    if (index >= coins_.size()) {
+        throw std::out_of_range("Wallet coin index out of range");
+    }
+    return coins_[index].spent;
+}
+
+void Wallet::mark_coin_spent(std::size_t index) {
+    if (index >= coins_.size()) {
+        throw std::out_of_range("Wallet coin index out of range");
+    }
+    coins_[index].spent = true;
+}
+
+void Wallet::print_all_coins() const {
+    std::cout << "Wallet stored coins: " << coins_.size() << "\n";
+
+    for (std::size_t i = 0; i < coins_.size(); ++i) {
+        std::cout << "\n=== Coin #" << i << " ===\n";
+        wallet::print_coin(coins_[i]);
+    }
+}
