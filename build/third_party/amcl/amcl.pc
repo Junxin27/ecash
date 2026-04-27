@@ -1,0 +1,10 @@
+prefix="C:/Program Files (x86)/ecash_fyp"
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include/amcl
+
+Name: amcl
+Description: AMCL is a standards compliant C cryptographic library designed to support the Internet of Things (IoT).
+Version: 2.0.1
+Libs: -L${libdir}  -lamcl_core -lamcl_curve_BLS381 -lamcl_pairing_BLS381
+Cflags: -I${includedir}

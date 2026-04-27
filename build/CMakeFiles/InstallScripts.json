@@ -1,0 +1,8 @@
+{
+	"InstallScripts" : 
+	[
+		"D:/EDU/FYP2/ecash-fyp/build/cmake_install.cmake",
+		"D:/EDU/FYP2/ecash-fyp/build/third_party/amcl/cmake_install.cmake"
+	],
+	"Parallel" : false
+}
